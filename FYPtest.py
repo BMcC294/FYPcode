@@ -101,7 +101,6 @@ def run_master_pipeline(csv_path):
             'RandomForest': (RandomForestRegressor(n_jobs=-1), {'n_estimators': [100], 'max_depth': [10]}),
             'XGBoost': (XGBRegressor(n_jobs=-1), {'learning_rate': [0.05, 0.1], 'max_depth': [3, 6]}),
             'SVR': (SVR(), {'C': [1, 10], 'kernel': ['rbf', 'linear']}),
-            'GaussianProcess': (GaussianProcessRegressor(normalize_y=True), {'kernel': [RBF(1.0)]}),
             'MLP': (MLPRegressor(early_stopping=True, max_iter=100000), {
                 'hidden_layer_sizes': [(50,), (100, 50)],
                 'alpha': [0.0001, 0.05]
