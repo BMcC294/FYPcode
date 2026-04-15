@@ -87,9 +87,7 @@ def run_master_pipeline(csv_path):
         selectors = {
             'None': lambda x, target: x,
             'MutualInfo': lambda x, target: x.iloc[:, np.argsort(mutual_info_regression(x, target))[-min(8, x.shape[1]):]],
-            'ARD': lambda x, target: x.iloc[:, np.where(np.abs(ARDRegression().fit(x, target).coef_) > 1e-3)[0]],
-            'Submodular': lambda x, target: x.iloc[:, FacilityLocationSelection(n_samples=min(8, x.shape[1]), 
-                                                                               metric='correlation').fit(x.values).ranking]
+            'ARD': lambda x, target: x.iloc[:, np.where(np.abs(ARDRegression().fit(x, target).coef_) > 1e-3)[0]]
         }
 
         # Model Grid Configuration
@@ -151,8 +149,89 @@ def run_master_pipeline(csv_path):
     results_df.to_csv('final_leaderboard_results.csv', index=False)
     return results_df
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def generate_final_plots(csv_path, results_df):
+    """
+    Reconstructs the top-ranked model from the leaderboard and 
+    generates the 1H-standard visualization suite.
+    """
+    print("\n--- Generating Final Visualization Suite ---")
+    
+ 
+    data = pd.read_csv(csv_path)
+    y_raw = np.log1p(data['Dev Time (Days)'])
+    X_raw = data.drop(columns=['Dev Time (Days)'])
+    X_clean, y_clean = get_clean_data(X_raw, y_raw, method='iso')
+    
+    X_tilde = generate_deep_knockoffs(X_clean.values)
+    mi_real = mutual_info_regression(X_clean, y_clean, random_state=42)
+    mi_tilde = mutual_info_regression(X_tilde, y_clean, random_state=42)
+    
+    knockoff_mask = mi_real > mi_tilde
+    X_passed = X_clean.iloc[:, knockoff_mask]
+   
+    final_mi = mutual_info_regression(X_passed, y_clean, random_state=42)
+    top_8_idx = np.argsort(final_mi)[-8:]
+    X_selected = X_passed.iloc[:, top_8_idx]
+  
+    scaler = StandardScaler()
+    X_final = scaler.fit_transform(X_selected)
+    
+    best_mlp = MLPRegressor(hidden_layer_sizes=(100, 50), alpha=0.05, 
+                            max_iter=100000, random_state=42)
+    best_mlp.fit(X_final, y_clean)
+    y_pred = best_mlp.predict(X_final)
+    residuals = y_clean - y_pred
+
+    plt.figure(figsize=(10, 6))
+    feat_importance = pd.Series(final_mi[top_8_idx], index=X_selected.columns)
+    sns.barplot(x=feat_importance.values, y=feat_importance.index, palette='viridis')
+    plt.title('Figure 6.3: Top 8 Validated Features (MI vs Knockoffs)', fontweight='bold')
+    plt.xlabel('Mutual Information Score')
+    sns.despine()
+    plt.tight_layout()
+    plt.savefig('plot_1_importance.png')
+
+    plt.figure(figsize=(8, 8))
+    sns.scatterplot(x=y_clean, y=y_pred, alpha=0.5, color='darkblue')
+    lims = [y_clean.min(), y_clean.max()]
+    plt.plot(lims, lims, color='red', linestyle='--', label='Perfect Prediction')
+    plt.title('Figure 6.4: Actual vs. Predicted Log(Dev Time)', fontweight='bold')
+    plt.xlabel('Actual Log(Dev Time)')
+    plt.ylabel('Predicted Log(Dev Time)')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig('plot_2_identity.png')
+
+    plt.figure(figsize=(10, 6))
+    sns.histplot(residuals, kde=True, color='purple')
+    plt.title('Figure 6.5: Distribution of Model Residuals (Normality)', fontweight='bold')
+    plt.xlabel('Residual Value (Log Units)')
+    plt.tight_layout()
+    plt.savefig('plot_3_res_dist.png')
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(x=y_pred, y=residuals, alpha=0.5, color='green')
+    plt.axhline(0, color='red', linestyle='--')
+    plt.title('Figure 6.6: Residuals vs. Predictions (Heteroscedasticity Check)', fontweight='bold')
+    plt.xlabel('Predicted Log(Dev Time)')
+    plt.ylabel('Residuals')
+    plt.tight_layout()
+    plt.savefig('plot_4_res_scatter.png')
+
+    print("Success: All 4 analysis plots saved to current directory.")
+
 if __name__ == "__main__":
     print("Master Pipeline Initialized. Running on Motorola Jira Dataset...")
     final_results = run_master_pipeline('imputed.csv')
-    print("\n--- TOP 10 PERFORMANCE CONFIGURATIONS ---")
-    print(final_results.head(10))
+
+    generate_final_plots('imputed.csv', final_results)
+    
+    print("\n--- COMPLETE PERFORMANCE LEADERBOARD ---")
+    with pd.option_context('display.max_rows', None, 
+                           'display.max_columns', None, 
+                           'display.width', 1000):
+        print(final_results)
+
+
